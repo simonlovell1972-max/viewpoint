@@ -1,437 +1,73 @@
-<!doctype html>
-<html lang="en-GB">
-  <head>
-    <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width,initial-scale=1" />
-    <title>ViewPoint Pricing Calculator (HTML + JS)</title>
-    <style>
-      :root {
-        --bg: #f8fafc;
-        --card: #ffffff;
-        --muted: #64748b;
-        --text: #0f172a;
-        --ring: #e2e8f0;
-        --focus: #cbd5e1;
+let PRICES = deepClone(DEFAULT_PRICES);
+
+function normalisePricingJson(data) {
+  const safe = deepClone(DEFAULT_PRICES);
+
+  if (!data || typeof data !== "object") return safe;
+
+  // platform
+  if (Number.isFinite(Number(data.platformPerYear))) {
+    safe.platformPerYear = Math.max(0, Math.trunc(Number(data.platformPerYear)));
+  }
+
+  // hardware
+  if (data.hardware && typeof data.hardware === "object") {
+    ["pulse", "tagBoard", "basicQr"].forEach((k) => {
+      if (Number.isFinite(Number(data.hardware[k]))) {
+        safe.hardware[k] = Math.max(0, Math.trunc(Number(data.hardware[k])));
       }
-      * { box-sizing: border-box; }
-      body {
-        margin: 0;
-        font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial;
-        background: var(--bg);
-        color: var(--text);
-      }
-      .wrap { max-width: 1100px; margin: 0 auto; padding: 24px; }
-      header h1 { margin: 0; font-size: 22px; font-weight: 650; letter-spacing: -0.02em; }
-      header p { margin: 8px 0 0; color: var(--muted); font-size: 13px; }
-      .grid { display: grid; gap: 18px; grid-template-columns: 1fr; margin-top: 18px; }
-      @media (min-width: 980px) { .grid { grid-template-columns: 1fr 1fr; } }
-      .card {
-        background: var(--card);
-        border: 1px solid var(--ring);
-        border-radius: 18px;
-        padding: 18px;
-        box-shadow: 0 1px 1px rgba(15, 23, 42, 0.04);
-      }
-      .card h2 { margin: 0; font-size: 16px; font-weight: 650; }
-      label { display: block; font-size: 13px; color: #334155; }
-      .help { display: block; margin-top: 6px; font-size: 12px; color: var(--muted); }
-      input[type="number"], select {
-        width: 100%;
-        margin-top: 6px;
-        padding: 10px 11px;
-        border: 1px solid var(--ring);
-        border-radius: 14px;
-        outline: none;
-        font-size: 13px;
-        background: #fff;
-      }
-      input[type="number"]:focus, select:focus { box-shadow: 0 0 0 3px var(--focus); }
-      .row2 { display: grid; gap: 12px; grid-template-columns: 1fr 1fr; }
-      .subcard {
-        background: #f8fafc;
-        border: 1px solid var(--ring);
-        border-radius: 14px;
-        padding: 14px;
-        margin-top: 12px;
-      }
-      .subcard .title { font-size: 13px; font-weight: 600; }
-      .kpis { margin-top: 12px; display: grid; gap: 12px; grid-template-columns: 1fr 1fr; }
-      .kpi {
-        background: #fff;
-        border: 1px solid var(--ring);
-        border-radius: 12px;
-        padding: 12px;
-      }
-      .kpi .k { font-size: 11px; color: var(--muted); }
-      .kpi .v { margin-top: 6px; font-size: 14px; font-weight: 650; }
-      .big { font-size: 20px !important; }
-      .muted { color: var(--muted); font-size: 12px; }
-      .foot { margin-top: 16px; font-size: 12px; color: var(--muted); }
+    });
+  }
 
-      /* Mini table */
-      .table {
-        width: 100%;
-        border-collapse: separate;
-        border-spacing: 0;
-        overflow: hidden;
-        border-radius: 12px;
-        border: 1px solid var(--ring);
-        background: #fff;
-        margin-top: 12px;
-      }
-      .table th, .table td {
-        padding: 10px 12px;
-        font-size: 13px;
-        border-bottom: 1px solid var(--ring);
-        text-align: left;
-        vertical-align: top;
-      }
-      .table th { background: #f1f5f9; font-size: 12px; color: #334155; }
-      .table tr:last-child td { border-bottom: 0; }
-      .right { text-align: right; }
-      .strong { font-weight: 700; }
-    </style>
-  </head>
+  // discounts
+  if (data.discountByTerm && typeof data.discountByTerm === "object") {
+    ["12", "24", "36"].forEach((k) => {
+      const v = Number(data.discountByTerm[k]);
+      if (Number.isFinite(v)) safe.discountByTerm[k] = Math.max(0, Math.min(1, v));
+    });
+  }
 
-  <body>
-    <div class="wrap">
-      <header>
-        <h1>ViewPoint Pricing Calculator</h1>
-        <p>
-          Retroactive tier pricing for reporting nodes. Hardware is one-off and never discounted.
-          Discounts apply to software only (Platform + Nodes).
-        </p>
-      </header>
+  // tiers
+  if (Array.isArray(data.tiersRetroactive) && data.tiersRetroactive.length) {
+    const tiers = data.tiersRetroactive
+      .map((t) => {
+        const min = Math.max(0, Math.trunc(Number(t.min)));
+        const max =
+          t.max === null || t.max === undefined || t.max === ""
+            ? Infinity
+            : Math.max(0, Math.trunc(Number(t.max)));
+        const price = Math.max(0, Math.trunc(Number(t.price)));
+        return { min, max, price };
+      })
+      .filter((t) => Number.isFinite(t.min) && Number.isFinite(t.price))
+      .sort((a, b) => a.min - b.min);
 
-      <div class="grid">
-        <!-- Inputs -->
-        <section class="card">
-          <h2>Inputs</h2>
+    // ensure last tier is Infinity
+    if (!tiers.some((t) => t.max === Infinity)) {
+      tiers.push({ min: 101, max: Infinity, price: tiers[tiers.length - 1]?.price ?? 0 });
+    }
+    safe.tiersRetroactive = tiers;
+  }
 
-          <div class="row2" style="margin-top:12px">
-            <label>
-              Total reporting nodes
-              <input id="totalNodes" type="number" min="1" step="1" value="1" />
-              <span class="help">Platform Licence includes the first reporting node.</span>
-            </label>
+  return safe;
+}
 
-            <label>
-              Contract term
-              <select id="termMonths">
-                <option value="12" selected>12 months (0%)</option>
-                <option value="24">24 months (30%)</option>
-                <option value="36">36 months (40%)</option>
-              </select>
-              <span class="help">Discount applies to software only (Platform + Nodes).</span>
-            </label>
-          </div>
+async function loadPricingFromFile() {
+  try {
+    const res = await fetch("./pricing.json", { cache: "no-store" });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = await res.json();
+    PRICES = normalisePricingJson(data);
+  } catch (e) {
+    // fallback to DEFAULT_PRICES already set
+    console.warn("Pricing file not loaded; using defaults.", e);
+    PRICES = deepClone(DEFAULT_PRICES);
+  }
 
-          <div class="subcard">
-            <div class="title">Hardware (one-off)</div>
+  // refresh UI + calculations after loading
+  syncPriceLabels();
+  recalcAndRender();
+}
 
-            <div class="row2" style="margin-top:10px">
-              <label>
-                Pulses (£550)
-                <input id="pulses" type="number" min="0" step="1" value="0" />
-              </label>
-              <label>
-                Tag Boards (£140)
-                <input id="tagBoards" type="number" min="0" step="1" value="0" />
-              </label>
-            </div>
-
-            <label style="margin-top:10px">
-              Basic QR Codes (£0)
-              <input id="basicQrs" type="number" min="0" step="1" value="0" />
-              <span class="help">Included for completeness; does not affect totals.</span>
-            </label>
-          </div>
-        </section>
-
-        <!-- Outputs -->
-        <section class="card">
-          <h2>Outputs</h2>
-
-          <div class="subcard" style="margin-top:12px">
-            <div class="title">Software</div>
-
-            <div class="kpis">
-              <div class="kpi">
-                <div class="k">Platform Licence (annual)</div>
-                <div class="v" id="platformFee">£0.00</div>
-              </div>
-
-              <div class="kpi">
-                <div class="k">Chargeable Nodes</div>
-                <div class="v" id="chargeableNodes">0</div>
-                <div class="muted" id="chargeableExplain"></div>
-              </div>
-
-              <div class="kpi">
-                <div class="k">Tier price per chargeable node</div>
-                <div class="v" id="tierPrice">£0.00</div>
-                <div class="muted">Retroactive (applies to all chargeable nodes)</div>
-              </div>
-
-              <div class="kpi">
-                <div class="k">Total annual software (full price)</div>
-                <div class="v" id="annualSoftwareFull">£0.00</div>
-              </div>
-
-              <div class="kpi">
-                <div class="k">Discount applied</div>
-                <div class="v" id="discountApplied">£0.00</div>
-                <div class="muted" id="discountExplain"></div>
-              </div>
-
-              <div class="kpi">
-                <div class="k">Discounted annual software</div>
-                <div class="v" id="annualSoftwareDiscounted">£0.00</div>
-              </div>
-            </div>
-          </div>
-
-          <div class="subcard">
-            <div class="title">Hardware (one-off)</div>
-
-            <div class="kpis">
-              <div class="kpi">
-                <div class="k">One-off hardware total</div>
-                <div class="v" id="hardwareTotal">£0.00</div>
-                <div class="muted" id="hardwareBreakdown"></div>
-              </div>
-
-              <div class="kpi">
-                <div class="k">Total Year 1 investment</div>
-                <div class="v big" id="totalYear1">£0.00</div>
-                <div class="muted">(Discounted software + one-off hardware)</div>
-              </div>
-            </div>
-          </div>
-
-          <!-- NEW: Contract breakdown -->
-          <div class="subcard">
-            <div class="title">Contract costs by year</div>
-            <table class="table" aria-label="Contract cost breakdown">
-              <thead>
-                <tr>
-                  <th style="width: 35%;">Period</th>
-                  <th class="right">Software</th>
-                  <th class="right">Hardware</th>
-                  <th class="right">Total</th>
-                </tr>
-              </thead>
-              <tbody>
-                <tr>
-                  <td>Year 1</td>
-                  <td class="right" id="y1Software">£0.00</td>
-                  <td class="right" id="y1Hardware">£0.00</td>
-                  <td class="right strong" id="y1Total">£0.00</td>
-                </tr>
-                <tr>
-                  <td>Year 2</td>
-                  <td class="right" id="y2Software">£0.00</td>
-                  <td class="right" id="y2Hardware">£0.00</td>
-                  <td class="right" id="y2Total">£0.00</td>
-                </tr>
-                <tr>
-                  <td>Year 3</td>
-                  <td class="right" id="y3Software">£0.00</td>
-                  <td class="right" id="y3Hardware">£0.00</td>
-                  <td class="right" id="y3Total">£0.00</td>
-                </tr>
-                <tr>
-                  <td class="strong">Total contract cost</td>
-                  <td class="right" id="contractSoftwareTotal">£0.00</td>
-                  <td class="right" id="contractHardwareTotal">£0.00</td>
-                  <td class="right strong" id="contractTotal">£0.00</td>
-                </tr>
-              </tbody>
-            </table>
-            <div class="muted" style="margin-top:8px">
-              Assumes the discounted annual software fee repeats each year during the term; hardware is one-off in Year 1 only.
-            </div>
-          </div>
-        </section>
-      </div>
-
-      <div class="foot">
-        Prices: Platform £849/yr (includes 1 reporting node), retroactive node tiers apply to chargeable nodes only,
-        discounts apply to software only, hardware is one-off.
-      </div>
-    </div>
-
-    <script>
-      // ---------------------------
-      // Pricing data
-      // ---------------------------
-      const PRICES = {
-        platformPerYear: 849,
-        hardware: { pulse: 550, tagBoard: 140, basicQr: 0 },
-        tiersRetroactive: [
-          { min: 1, max: 5, price: 350 },
-          { min: 6, max: 20, price: 325 },
-          { min: 21, max: 40, price: 300 },
-          { min: 41, max: 75, price: 260 },
-          { min: 76, max: 100, price: 230 },
-          { min: 101, max: Infinity, price: 200 },
-        ],
-        discountByTerm: { 12: 0, 24: 0.3, 36: 0.4 },
-      };
-
-      // Helpers
-      function clampInt(value, min = 0) {
-        const n = Number(value);
-        if (!Number.isFinite(n)) return min;
-        return Math.max(min, Math.trunc(n));
-      }
-
-      function formatGBP(value) {
-        const n = Number(value) || 0;
-        return n.toLocaleString("en-GB", {
-          style: "currency",
-          currency: "GBP",
-          minimumFractionDigits: 2,
-          maximumFractionDigits: 2,
-        });
-      }
-
-      function tierPriceForChargeableNodes(chargeableNodes) {
-        if (chargeableNodes <= 0) return 0;
-        const tier = PRICES.tiersRetroactive.find(
-          (t) => chargeableNodes >= t.min && chargeableNodes <= t.max
-        );
-        return tier ? tier.price : 0;
-      }
-
-      // DOM refs
-      const els = {
-        totalNodes: document.getElementById("totalNodes"),
-        pulses: document.getElementById("pulses"),
-        tagBoards: document.getElementById("tagBoards"),
-        basicQrs: document.getElementById("basicQrs"),
-        termMonths: document.getElementById("termMonths"),
-
-        platformFee: document.getElementById("platformFee"),
-        chargeableNodes: document.getElementById("chargeableNodes"),
-        chargeableExplain: document.getElementById("chargeableExplain"),
-        tierPrice: document.getElementById("tierPrice"),
-        annualSoftwareFull: document.getElementById("annualSoftwareFull"),
-        discountApplied: document.getElementById("discountApplied"),
-        discountExplain: document.getElementById("discountExplain"),
-        annualSoftwareDiscounted: document.getElementById("annualSoftwareDiscounted"),
-        hardwareTotal: document.getElementById("hardwareTotal"),
-        hardwareBreakdown: document.getElementById("hardwareBreakdown"),
-        totalYear1: document.getElementById("totalYear1"),
-
-        // New: contract breakdown
-        y1Software: document.getElementById("y1Software"),
-        y1Hardware: document.getElementById("y1Hardware"),
-        y1Total: document.getElementById("y1Total"),
-        y2Software: document.getElementById("y2Software"),
-        y2Hardware: document.getElementById("y2Hardware"),
-        y2Total: document.getElementById("y2Total"),
-        y3Software: document.getElementById("y3Software"),
-        y3Hardware: document.getElementById("y3Hardware"),
-        y3Total: document.getElementById("y3Total"),
-        contractSoftwareTotal: document.getElementById("contractSoftwareTotal"),
-        contractHardwareTotal: document.getElementById("contractHardwareTotal"),
-        contractTotal: document.getElementById("contractTotal"),
-      };
-
-      function recalcAndRender() {
-        // Inputs
-        const nodes = clampInt(els.totalNodes.value, 1);
-        const pulses = clampInt(els.pulses.value, 0);
-        const tagBoards = clampInt(els.tagBoards.value, 0);
-        const basicQrs = clampInt(els.basicQrs.value, 0);
-        const term = clampInt(els.termMonths.value, 12);
-        const years = Math.max(1, Math.round(term / 12)); // 12->1, 24->2, 36->3
-
-        // Calculation
-        const chargeableNodes = Math.max(0, nodes - 1);
-        const tierPrice = tierPriceForChargeableNodes(chargeableNodes);
-
-        const annualSoftwareFull = PRICES.platformPerYear + (chargeableNodes * tierPrice);
-
-        const discountRate = PRICES.discountByTerm[String(term)] ?? 0;
-        const discountApplied = annualSoftwareFull * discountRate;
-        const annualSoftwareDiscounted = annualSoftwareFull - discountApplied;
-
-        const hardwareTotal =
-          pulses * PRICES.hardware.pulse +
-          tagBoards * PRICES.hardware.tagBoard +
-          basicQrs * PRICES.hardware.basicQr;
-
-        const totalYear1 = annualSoftwareDiscounted + hardwareTotal;
-
-        // Outputs (main)
-        els.platformFee.textContent = formatGBP(PRICES.platformPerYear);
-
-        els.chargeableNodes.textContent = String(chargeableNodes);
-        els.chargeableExplain.textContent = `Total nodes (${nodes}) − 1 bundled`;
-
-        els.tierPrice.textContent = formatGBP(tierPrice);
-        els.annualSoftwareFull.textContent = formatGBP(annualSoftwareFull);
-
-        els.discountApplied.textContent = formatGBP(discountApplied);
-        els.discountExplain.textContent = `${Math.round(discountRate * 100)}% (${term} months)`;
-
-        els.annualSoftwareDiscounted.textContent = formatGBP(annualSoftwareDiscounted);
-
-        els.hardwareTotal.textContent = formatGBP(hardwareTotal);
-        els.hardwareBreakdown.innerHTML =
-          `Pulses: ${pulses} × ${formatGBP(PRICES.hardware.pulse)}<br>` +
-          `Tag Boards: ${tagBoards} × ${formatGBP(PRICES.hardware.tagBoard)}<br>` +
-          `Basic QR: ${basicQrs} × ${formatGBP(PRICES.hardware.basicQr)}`;
-
-        els.totalYear1.textContent = formatGBP(totalYear1);
-
-        // New: contract breakdown
-        const y1Software = annualSoftwareDiscounted;
-        const y1Hardware = hardwareTotal;
-        const y1Total = y1Software + y1Hardware;
-
-        const y2Software = years >= 2 ? annualSoftwareDiscounted : 0;
-        const y2Hardware = 0;
-        const y2Total = y2Software;
-
-        const y3Software = years >= 3 ? annualSoftwareDiscounted : 0;
-        const y3Hardware = 0;
-        const y3Total = y3Software;
-
-        const contractSoftwareTotal = annualSoftwareDiscounted * years;
-        const contractHardwareTotal = hardwareTotal;
-        const contractTotal = contractSoftwareTotal + contractHardwareTotal;
-
-        els.y1Software.textContent = formatGBP(y1Software);
-        els.y1Hardware.textContent = formatGBP(y1Hardware);
-        els.y1Total.textContent = formatGBP(y1Total);
-
-        els.y2Software.textContent = formatGBP(y2Software);
-        els.y2Hardware.textContent = formatGBP(y2Hardware);
-        els.y2Total.textContent = formatGBP(y2Total);
-
-        els.y3Software.textContent = formatGBP(y3Software);
-        els.y3Hardware.textContent = formatGBP(y3Hardware);
-        els.y3Total.textContent = formatGBP(y3Total);
-
-        els.contractSoftwareTotal.textContent = formatGBP(contractSoftwareTotal);
-        els.contractHardwareTotal.textContent = formatGBP(contractHardwareTotal);
-        els.contractTotal.textContent = formatGBP(contractTotal);
-      }
-
-      // Wire events
-      ["input", "change"].forEach((evt) => {
-        els.totalNodes.addEventListener(evt, recalcAndRender);
-        els.pulses.addEventListener(evt, recalcAndRender);
-        els.tagBoards.addEventListener(evt, recalcAndRender);
-        els.basicQrs.addEventListener(evt, recalcAndRender);
-        els.termMonths.addEventListener(evt, recalcAndRender);
-      });
-
-      // Initial render
-      recalcAndRender();
-    </script>
-  </body>
-</html>
+// call this during init:
+loadPricingFromFile();
